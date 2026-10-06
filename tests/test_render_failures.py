@@ -66,6 +66,27 @@ class RenderTests(unittest.TestCase):
                 stream.seek(size - header_size, 1)
         self.assertLess(atoms.index(b"moov"), atoms.index(b"mdat"))
 
+    def test_preview_caps_resolution_and_fps_without_replacing_final(self):
+        large = self.root / "large.mp4"
+        subprocess.run(["ffmpeg", "-v", "error", "-f", "lavfi", "-i",
+                        "color=c=navy:s=1280x720:r=30:d=2", "-c:v", "libx264",
+                        "-pix_fmt", "yuv420p", str(large)], check=True)
+        self.args[0] = str(large)
+        final = self.root / "large_MLG.mp4"
+        final.write_bytes(b"existing final render")
+        self.invoke(("--width", "1280", "--preview"))
+        result = render.probe(self.root / "large_MLG_preview.mp4")
+        self.assertEqual((result["w"], result["h"], result["fps"]), (640, 360, 15))
+        self.assertTrue(result["has_audio"])
+        self.assertAlmostEqual(result["duration"], 0.7 + render.FIRST + render.DROP_GAP + 0.05, delta=0.1)
+        self.assertEqual(final.read_bytes(), b"existing final render")
+
+    def test_preview_preserves_smaller_width_and_explicit_output(self):
+        out = self.root / "custom.mp4"
+        self.invoke(("--preview", "--width", "160", "-o", str(out)))
+        result = render.probe(out)
+        self.assertEqual((result["w"], result["h"], result["fps"]), (160, 90, 10))
+
     def test_encoder_failure_preserves_existing_output(self):
         out = self.root / "result.invalid"
         out.write_bytes(b"previous output")

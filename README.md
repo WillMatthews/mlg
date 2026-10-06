@@ -45,6 +45,17 @@ To try the included demo:
 uv run mlg demo/target_practice.mp4 -m 3.2
 ```
 
+## Preview first
+
+```sh
+uv run mlg clip.mp4 --preview
+```
+
+This renders the full montage with sound at up to 640 pixels wide and 15fps,
+using a faster encoder. It writes `clip_MLG_preview.mp4`, so it won't replace
+your full render. Smaller sources and `--width` values stay smaller.
+Use the same options without `--preview` when you're happy with it.
+
 ## Choose the sections
 
 Everything is on by default. Skip sections with `--no-weed`,

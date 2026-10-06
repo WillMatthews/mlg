@@ -574,10 +574,12 @@ def output_width(value):
 def main(argv=None):
     ap = argparse.ArgumentParser(description="MLG-ify a video clip.")
     ap.add_argument("input")
-    ap.add_argument("-o", "--output", help="default: <input>_MLG.mp4")
+    ap.add_argument("-o", "--output", help="default: <input>_MLG.mp4 (or <input>_MLG_preview.mp4)")
     ap.add_argument("-m", "--moment", type=nonnegative_number, help="time (s) of the big moment; default: loudest point")
     ap.add_argument("--target", type=target_point, default="0.5,0.5", help="scope aim / shades landing point as x,y fractions")
     ap.add_argument("--width", type=output_width, default=1280)
+    ap.add_argument("--preview", action="store_true",
+                    help="quick render: up to 640px wide at 15fps, with faster encoding")
     ap.add_argument("--seed", type=int, default=420)
     music = ap.add_mutually_exclusive_group()
     music.add_argument("--drop", help="drop track (default: sounds/drop.*, else synthesised wobble)")
@@ -612,7 +614,8 @@ def main(argv=None):
 
 def render_video(a, ap):
     inp = Path(a.input)
-    out = Path(a.output or inp.with_name(inp.stem + "_MLG.mp4"))
+    suffix = "_MLG_preview.mp4" if a.preview else "_MLG.mp4"
+    out = Path(a.output or inp.with_name(inp.stem + suffix))
     if not inp.is_file():
         ap.error(f"input file does not exist: {inp}")
     if a.drop and not Path(a.drop).is_file():
@@ -638,11 +641,11 @@ def render_video(a, ap):
         ap.error(f"cannot read input video: {exc}")
     if a.moment is not None and a.moment > info["duration"]:
         ap.error(f"moment must be within the input video ({info['duration']:g} seconds)")
-    w = min(a.width, info["w"]) // 2 * 2
+    w = min(a.width, info["w"], 640 if a.preview else a.width) // 2 * 2
     h = int(info["h"] * w / info["w"]) // 2 * 2
     if h < 2:
         ap.error("width is too small for this video aspect ratio")
-    fps = min(30.0, info["fps"])
+    fps = min(15.0 if a.preview else 30.0, info["fps"])
     orig = load_audio(inp, info["has_audio"])
     moment = a.moment if a.moment is not None else loudest_moment(orig, info["duration"])
     moment = min(max(moment, SCOPE_IN + 0.3), info["duration"])
@@ -664,7 +667,8 @@ def render_video(a, ap):
         with tempfile.TemporaryFile(mode="w+b") as errors:
             enc = subprocess.Popen(["ffmpeg", "-v", "error", "-y", "-f", "rawvideo", "-pix_fmt", "rgb24",
                                     "-s", f"{w}x{h}", "-r", f"{fps}", "-i", "-", "-i", str(wav),
-                                    "-c:v", "libx264", "-preset", "fast", "-crf", "20", "-pix_fmt", "yuv420p",
+                                    "-c:v", "libx264", "-preset", "ultrafast" if a.preview else "fast",
+                                    "-crf", "28" if a.preview else "20", "-pix_fmt", "yuv420p",
                                     "-c:a", "aac", "-b:a", "192k", "-shortest",
                                     "-movflags", "+faststart", str(staged)],
                                    stdin=subprocess.PIPE, stderr=errors)

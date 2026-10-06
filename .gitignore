@@ -1,6 +1,7 @@
 .venv/
 __pycache__/
 *_MLG.mp4
+*_MLG_preview.mp4
 !demo/demo_MLG.mp4
 assets/raw/
 sounds/raw/

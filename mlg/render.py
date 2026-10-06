@@ -5,6 +5,7 @@ import io
 import json
 import math
 import random
+import shutil
 import subprocess
 import sys
 import tempfile
@@ -35,7 +36,9 @@ def probe(path):
     out = subprocess.run(["ffprobe", "-v", "error", "-show_streams", "-show_format", "-of", "json", str(path)],
                          check=True, capture_output=True, text=True).stdout
     info = json.loads(out)
-    v = next(s for s in info["streams"] if s["codec_type"] == "video")
+    v = next((s for s in info["streams"] if s["codec_type"] == "video"), None)
+    if v is None:
+        raise ValueError("input has no video stream")
     num, den = map(int, v["r_frame_rate"].split("/"))
     return {
         "w": int(v["width"]), "h": int(v["height"]), "fps": num / den,
@@ -126,7 +129,9 @@ class MLG:
         self.shots = [moment] + [self.R0 + k * REPLAY_LEN + REPLAY_SHOT for k in range(self.replays)]
         if drop:
             self.drop_audio = sfx.decode(drop, drop_start, drop_len, trim_silence=False)
-            fade = int(0.3 * sfx.SR)
+            if not len(self.drop_audio):
+                raise ValueError("drop contains no audio at --drop-start")
+            fade = min(len(self.drop_audio), int(0.3 * sfx.SR))
             self.drop_audio[-fade:] *= np.linspace(1, 0, fade)
             self.beat = 60.0 / bpm
         else:
@@ -506,18 +511,56 @@ def write_wav(path, x):
         wf.writeframes(pcm.tobytes())
 
 
+def finite_number(value):
+    number = float(value)
+    if not math.isfinite(number):
+        raise argparse.ArgumentTypeError("must be a finite number")
+    return number
+
+
+def positive_number(value):
+    number = finite_number(value)
+    if number <= 0:
+        raise argparse.ArgumentTypeError("must be greater than zero")
+    return number
+
+
+def nonnegative_number(value):
+    number = finite_number(value)
+    if number < 0:
+        raise argparse.ArgumentTypeError("must be zero or greater")
+    return number
+
+
+def target_point(value):
+    try:
+        point = tuple(float(part) for part in value.split(","))
+        if len(point) != 2 or any(not math.isfinite(n) or not 0 <= n <= 1 for n in point):
+            raise ValueError
+        return point
+    except ValueError:
+        raise argparse.ArgumentTypeError("target must be x,y with both coordinates between 0 and 1") from None
+
+
+def output_width(value):
+    width = int(value)
+    if width < 2:
+        raise argparse.ArgumentTypeError("width must be at least 2 pixels")
+    return width
+
+
 def main(argv=None):
     ap = argparse.ArgumentParser(description="MLG-ify a video clip.")
     ap.add_argument("input")
     ap.add_argument("-o", "--output", help="default: <input>_MLG.mp4")
-    ap.add_argument("-m", "--moment", type=float, help="time (s) of the big moment; default: loudest point")
-    ap.add_argument("--target", default="0.5,0.5", help="scope aim / shades landing point as x,y fractions")
-    ap.add_argument("--width", type=int, default=1280)
+    ap.add_argument("-m", "--moment", type=nonnegative_number, help="time (s) of the big moment; default: loudest point")
+    ap.add_argument("--target", type=target_point, default="0.5,0.5", help="scope aim / shades landing point as x,y fractions")
+    ap.add_argument("--width", type=output_width, default=1280)
     ap.add_argument("--seed", type=int, default=420)
     ap.add_argument("--drop", help="drop track (default: sounds/drop.*, else synthesised wobble)")
-    ap.add_argument("--drop-start", type=float, default=0.0, help="where the drop starts in the track (s)")
-    ap.add_argument("--drop-len", type=float, default=8.0, help="seconds of drop to use")
-    ap.add_argument("--bpm", type=float, default=140.0, help="drop tempo, for beat-synced zooms")
+    ap.add_argument("--drop-start", type=nonnegative_number, default=0.0, help="where the drop starts in the track (s)")
+    ap.add_argument("--drop-len", type=positive_number, default=8.0, help="seconds of drop to use")
+    ap.add_argument("--bpm", type=positive_number, default=140.0, help="drop tempo, for beat-synced zooms")
     sections = ap.add_argument_group("sections (all enabled by default)")
     sections.add_argument("--weed", action=argparse.BooleanOptionalAction, default=True,
                           help="weed outro and joint/leaf overlays")
@@ -531,14 +574,40 @@ def main(argv=None):
 
     inp = Path(a.input)
     out = Path(a.output or inp.with_name(inp.stem + "_MLG.mp4"))
-    info = probe(inp)
+    if not inp.is_file():
+        ap.error(f"input file does not exist: {inp}")
+    if a.drop and not Path(a.drop).is_file():
+        ap.error(f"drop file does not exist: {a.drop}")
+    if out.resolve() == inp.resolve() or (a.drop and out.resolve() == Path(a.drop).resolve()):
+        ap.error("output must not overwrite the input video or drop track")
+    if not out.parent.is_dir():
+        ap.error(f"output directory does not exist: {out.parent}")
+    if out.exists() and not out.is_file():
+        ap.error(f"output is not a regular file: {out}")
+    for program in ("ffmpeg", "ffprobe"):
+        if shutil.which(program) is None:
+            ap.error(f"{program} is required; install FFmpeg and add it to PATH")
+    try:
+        info = probe(inp)
+        if not math.isfinite(info["duration"]) or info["duration"] <= 0:
+            raise ValueError("input duration must be positive and finite")
+        if not math.isfinite(info["fps"]) or info["fps"] <= 0:
+            raise ValueError("input frame rate must be positive and finite")
+        if info["w"] < 2 or info["h"] < 2:
+            raise ValueError("input dimensions must be at least 2 pixels")
+    except (subprocess.CalledProcessError, ValueError, KeyError, ZeroDivisionError) as exc:
+        ap.error(f"cannot read input video: {exc}")
+    if a.moment is not None and a.moment > info["duration"]:
+        ap.error(f"moment must be within the input video ({info['duration']:g} seconds)")
     w = min(a.width, info["w"]) // 2 * 2
     h = int(info["h"] * w / info["w"]) // 2 * 2
+    if h < 2:
+        ap.error("width is too small for this video aspect ratio")
     fps = min(30.0, info["fps"])
     orig = load_audio(inp, info["has_audio"])
     moment = a.moment if a.moment is not None else loudest_moment(orig, info["duration"])
     moment = min(max(moment, SCOPE_IN + 0.3), info["duration"])
-    target = tuple(float(v) for v in a.target.split(","))
+    target = a.target
 
     drop = a.drop or sfx.find_sound("drop")
     mlg = MLG(w, h, fps, moment, target, a.seed, drop, a.drop_start, a.drop_len, a.bpm,

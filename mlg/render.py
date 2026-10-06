@@ -113,12 +113,17 @@ def smoothstep(x):
 
 
 class MLG:
-    def __init__(self, w, h, fps, moment, target, seed, drop=None, drop_start=0.0, drop_len=6.0, bpm=140.0):
+    def __init__(self, w, h, fps, moment, target, seed, drop=None, drop_start=0.0, drop_len=6.0, bpm=140.0,
+                 *, weed=True, deal_with_it=True, illuminati=True, replays=True):
         self.w, self.h, self.fps = w, h, fps
         self.M = moment
+        self.weed = weed
+        self.deal_with_it = deal_with_it
+        self.illuminati = illuminati
+        self.replays = REPLAYS if replays else 0
         self.R0 = moment + FIRST                                   # instant replays start
-        self.D = self.R0 + REPLAYS * REPLAY_LEN + DROP_GAP         # the drop
-        self.shots = [moment] + [self.R0 + k * REPLAY_LEN + REPLAY_SHOT for k in range(REPLAYS)]
+        self.D = self.R0 + self.replays * REPLAY_LEN + DROP_GAP         # the drop
+        self.shots = [moment] + [self.R0 + k * REPLAY_LEN + REPLAY_SHOT for k in range(self.replays)]
         if drop:
             self.drop_audio = sfx.decode(drop, drop_start, drop_len, trim_silence=False)
             fade = int(0.3 * sfx.SR)
@@ -127,8 +132,8 @@ class MLG:
         else:
             self.drop_audio, self.beat = sfx.dubstep_drop(bars=4)
         self.E = self.D + len(self.drop_audio) / sfx.SR
-        self.W = self.E + ILLUM_LEN      # smoke weed everyday
-        self.DW = self.W + WEED_LEN      # deal with it
+        self.W = self.E + (ILLUM_LEN if illuminati else 0)      # smoke weed everyday
+        self.DW = self.W + (WEED_LEN if weed else 0)      # deal with it
         self.clips = {
             "airhorn": sfx.load("airhorn", sfx.airhorn),
             "hitmarker": sfx.load("hitmarker", sfx.hitmarker),
@@ -151,7 +156,7 @@ class MLG:
         self.mom_at = self.D + 0.05
         self.triple_at = min(self.mom_at + dur("mom") + 0.05, self.E - 1.0)
         self.damn_at = min(self.triple_at + dur("triple") + 0.05, self.E - 1.0)
-        self.total = self.DW + DEAL_LEN
+        self.total = self.DW + (DEAL_LEN if deal_with_it else 0)
         self.tx, self.ty = target[0] * w, target[1] * h
         self.rnd = random.Random(seed)
         s = h / 720
@@ -179,7 +184,7 @@ class MLG:
         self.logo = logo and fit(logo, width=int(170 * s))
         self.obey = obey and fit(obey, width=int(250 * s))
         joint = sprites.load("joint", lambda: None)
-        self.joint = joint and fit(joint, width=int(300 * s))
+        self.joint = self.weed and joint and fit(joint, width=int(300 * s))
         flare = sprites.load("lens_flare", lambda: None)
         sanic = sprites.load("sanic", lambda: None)
         self.flare = flare and fit(flare, width=int(w * 0.7))
@@ -198,7 +203,7 @@ class MLG:
                              self.rnd.uniform(-540, 540)) for _ in range(count)]
 
         self.particles = rain(snacks, self.D, self.E - 0.6, 24)
-        if leaves:
+        if leaves and self.weed:
             self.particles += rain(leaves, self.W, self.DW, 14)
         b = self.beat
         bars = max(1, round((self.E - self.D) / (4 * b)))
@@ -222,7 +227,7 @@ class MLG:
     # --- timing -----------------------------------------------------------
     def replay(self, t):
         """(index, seconds into it) while an instant replay is playing, else None."""
-        if self.R0 <= t < self.R0 + REPLAYS * REPLAY_LEN:
+        if self.R0 <= t < self.R0 + self.replays * REPLAY_LEN:
             k = int((t - self.R0) / REPLAY_LEN)
             return k, t - self.R0 - k * REPLAY_LEN
         return None
@@ -237,7 +242,7 @@ class MLG:
         if r:  # rewind to just before the shot; each replay slower than the last
             speed = 1.0 / (1 + r[0])
             return max(0.0, M + (r[1] - REPLAY_SHOT) * speed)
-        rend = self.R0 + REPLAYS * REPLAY_LEN
+        rend = self.R0 + self.replays * REPLAY_LEN
         return M + FIRST * SLOWMO + max(0.0, min(t, self.E) - rend) * SLOWMO  # frozen in the tail
 
     def beat_pulse(self, t):
@@ -263,7 +268,7 @@ class MLG:
         scale = pop * (1 + (0.08 * math.sin(t * 25) if wobble else 0))
         if scale <= 0.01:
             return
-        spr = sprites.meme_text(msg, int(size * self.s * scale), colour or sprites.rainbow(t))
+        spr = sprites.meme_text(msg, max(1, int(size * self.s * scale)), colour or sprites.rainbow(t))
         self.paste(im, spr, cx, cy, angle=(6 * math.sin(t * 9) if wobble else 0))
 
     # --- the frame --------------------------------------------------------
@@ -292,7 +297,7 @@ class MLG:
             shake = 6 + 18 * self.beat_pulse(t)
         elif t < self.W:  # illuminati: slow ominous push-in
             zoom = 1 + 0.3 * smoothstep((t - E) / ILLUM_LEN)
-        else:
+        elif self.W <= t < self.total:
             zoom = 1 + 0.15 * smoothstep((t - self.W) / (self.total - self.W))
         if zoom != 1.0 or shake:
             cw, ch = w / zoom, h / zoom
@@ -326,7 +331,7 @@ class MLG:
 
         im = src.convert("RGBA")
 
-        if D <= t < E:
+        if self.illuminati and D <= t < E:
             spin = (t - D) * 60
             grow = smoothstep((t - D) / 0.4) * (1 + 0.25 * self.beat_pulse(t))
             self.paste(im, self.eye, w / 2, h / 2, angle=spin, scale=grow, alpha=0.9)
@@ -420,7 +425,7 @@ class MLG:
 
         if self.W <= t < self.DW:
             self.text(im, t, "SMOKE WEED EVERYDAY", w / 2, h * 0.15, 80, self.W, colour=(60, 220, 60))
-        if t >= self.W:
+        if self.deal_with_it and t >= self.W:
             fall = smoothstep((t - self.DW + 0.8) / 0.8)
             shades_y = -100 * s + (self.ty - 30 * s + 100 * s) * fall
             if self.obey:
@@ -472,7 +477,7 @@ class MLG:
         for k, st in enumerate(self.shots[1:]):  # every replay: shot, airhorn, and the crowd on the last
             place(c["sniper"][: int((REPLAY_LEN - REPLAY_SHOT) * sfx.SR)], st)
             place(c["airhorn"][: int(0.4 * sfx.SR)], st + 0.08, 0.8)
-            if k == REPLAYS - 1:
+            if k == self.replays - 1:
                 place(c["crowd_ohh"], st + 0.1, 0.9)
         place(self.drop_audio, self.D, 0.8)
         place(c["mom"], self.mom_at, 1.0)
@@ -482,10 +487,13 @@ class MLG:
         place(c["wombo"], self.wombo_at, 1.0)
         for (wt, _, _) in self.wows:
             place(c["wow"], wt, 0.7)
-        place(c["xfiles"][: int(ILLUM_LEN * sfx.SR)], self.E, 1.0)
-        place(c["airhorn"], self.W, 0.8)
-        place(c["weed"][: int(WEED_LEN * sfx.SR)], self.W, 1.0)
-        place(c["deal"], self.DW, 1.0)
+        if self.illuminati:
+            place(c["xfiles"][: int(ILLUM_LEN * sfx.SR)], self.E, 1.0)
+        if self.weed:
+            place(c["airhorn"], self.W, 0.8)
+            place(c["weed"][: int(WEED_LEN * sfx.SR)], self.W, 1.0)
+        if self.deal_with_it:
+            place(c["deal"], self.DW, 1.0)
         return np.tanh(1.3 * out[: int(self.total * sfx.SR)])  # loud, soft-clipped
 
 
@@ -510,6 +518,15 @@ def main(argv=None):
     ap.add_argument("--drop-start", type=float, default=0.0, help="where the drop starts in the track (s)")
     ap.add_argument("--drop-len", type=float, default=8.0, help="seconds of drop to use")
     ap.add_argument("--bpm", type=float, default=140.0, help="drop tempo, for beat-synced zooms")
+    sections = ap.add_argument_group("sections (all enabled by default)")
+    sections.add_argument("--weed", action=argparse.BooleanOptionalAction, default=True,
+                          help="weed outro and joint/leaf overlays")
+    sections.add_argument("--deal-with-it", action=argparse.BooleanOptionalAction, default=True,
+                          help="shades, hat, and deal-with-it outro")
+    sections.add_argument("--illuminati", action=argparse.BooleanOptionalAction, default=True,
+                          help="Illuminati outro and eye overlay during the drop")
+    sections.add_argument("--replays", action=argparse.BooleanOptionalAction, default=True,
+                          help="two instant replays after the shot")
     a = ap.parse_args(argv)
 
     inp = Path(a.input)
@@ -524,7 +541,8 @@ def main(argv=None):
     target = tuple(float(v) for v in a.target.split(","))
 
     drop = a.drop or sfx.find_sound("drop")
-    mlg = MLG(w, h, fps, moment, target, a.seed, drop, a.drop_start, a.drop_len, a.bpm)
+    mlg = MLG(w, h, fps, moment, target, a.seed, drop, a.drop_start, a.drop_len, a.bpm,
+              weed=a.weed, deal_with_it=a.deal_with_it, illuminati=a.illuminati, replays=a.replays)
     print(f"big moment @ {moment:.2f}s, drop @ {mlg.D:.2f}s, output {mlg.total:.1f}s {w}x{h}@{fps:g}", file=sys.stderr)
 
     with tempfile.TemporaryDirectory() as tmp:

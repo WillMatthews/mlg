@@ -45,6 +45,20 @@ To try the included demo:
 uv run mlg demo/target_practice.mp4 -m 3.2
 ```
 
+## Choose the sections
+
+Everything is on by default. Skip sections with `--no-weed`,
+`--no-deal-with-it`, `--no-illuminati`, or `--no-replays`:
+
+```sh
+uv run mlg clip.mp4 --no-weed --no-deal-with-it
+```
+
+Skipped sections remove their audio and shorten the video. `--no-weed` also
+removes the joints and falling leaves; `--no-illuminati` removes the eye during
+the drop. You can explicitly enable them with `--weed`, `--deal-with-it`,
+`--illuminati`, and `--replays`.
+
 ## Bring your own drop
 
 Without a track, `mlg` generates a 140 BPM wobble drop. Use `--drop` to supply

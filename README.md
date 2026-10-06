@@ -56,6 +56,17 @@ using a faster encoder. It writes `clip_MLG_preview.mp4`, so it won't replace
 your full render. Smaller sources and `--width` values stay smaller.
 Use the same options without `--preview` when you're happy with it.
 
+## How much MLG?
+
+```sh
+uv run mlg clip.mp4 --intensity low --preview
+uv run mlg clip.mp4 --intensity chaos
+```
+
+`normal` keeps the original look. `low` reduces camera shake, flashes, hitmarkers,
+falling memes, and deep-frying. `chaos` turns them up. The sections, timing,
+and audio levels stay the same, so you can compare styles on the same clip.
+
 ## Choose the sections
 
 Everything is on by default. Skip sections with `--no-weed`,

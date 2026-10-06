@@ -17,6 +17,7 @@ import numpy as np
 from PIL import Image, ImageEnhance
 
 from . import sfx, sprites
+from .effects import INTENSITIES
 
 SCOPE_IN = 0.35    # seconds scoped in before the shot (it's a QUICKscope)
 QS_FPS = 25        # the green-screen quickscope animation's frame rate
@@ -127,7 +128,7 @@ def smoothstep(x):
 class MLG:
     def __init__(self, w, h, fps, moment, target, seed, drop=None, drop_start=0.0, drop_len=6.0, bpm=140.0,
                  *, weed=True, deal_with_it=True, illuminati=True, replays=True,
-                 replay_count=REPLAYS, drop_enabled=True):
+                 replay_count=REPLAYS, drop_enabled=True, intensity="normal"):
         self.w, self.h, self.fps = w, h, fps
         self.M = moment
         self.weed = weed
@@ -135,6 +136,7 @@ class MLG:
         self.illuminati = illuminati
         self.replays = replay_count if replays else 0
         self.drop_enabled = drop_enabled
+        self.effects = INTENSITIES[intensity]
         self.R0 = moment + FIRST                                   # instant replays start
         self.D = self.R0 + self.replays * REPLAY_LEN + (DROP_GAP if drop_enabled else 0)         # the drop
         self.shots = [moment] + [self.R0 + k * REPLAY_LEN + REPLAY_SHOT for k in range(self.replays)]
@@ -221,18 +223,20 @@ class MLG:
                              self.rnd.uniform(300, 700) * s, self.rnd.uniform(-80, 80) * s,
                              self.rnd.uniform(-540, 540)) for _ in range(count)]
 
-        self.particles = rain(snacks, self.D, self.E - 0.6, 24) if drop_enabled else []
+        self.particles = rain(snacks, self.D, self.E - 0.6, self.effects.particle_count(24)) if drop_enabled else []
         if leaves and self.weed:
-            self.particles += rain(leaves, self.W, self.DW, 14)
+            self.particles += rain(leaves, self.W, self.DW, self.effects.particle_count(14))
         b = self.beat
         bars = max(1, round((self.E - self.D) / (4 * b))) if drop_enabled else 0
         self.kicks = [self.D + bar * 4 * b + o for bar in range(bars) for o in (0, 2.5 * b)]
         self.snares = [self.D + bar * 4 * b + 2 * b for bar in range(bars)]
         # Hitmarker spam: a burst on the shot (round the target), then every 8th note of the drop
         # plus doubles on the kicks (anywhere on screen).
-        shot = [st + 0.1 * i for st in self.shots for i in range(4 if st == self.M else 3)]
-        spam = [self.D + k * b / 2 for k in range(int((self.E - self.D) / (b / 2)))]
-        spam += [k + 0.05 * (i + 1) for k in self.kicks for i in range(2)]
+        shot = [st + 0.1 * i for st in self.shots
+                for i in range(self.effects.hit_count(4 if st == self.M else 3))]
+        interval = (b / 2) / self.effects.hitmarkers
+        spam = [self.D + k * interval for k in range(int((self.E - self.D) / interval))]
+        spam += [k + 0.05 * (i + 1) for k in self.kicks for i in range(self.effects.hit_count(2))]
         self.hits = shot + sorted(spam)
         self.hit_pos = ([(self.tx + self.rnd.uniform(-120, 120) * s, self.ty + self.rnd.uniform(-90, 90) * s)
                          for _ in shot]
@@ -318,6 +322,7 @@ class MLG:
             zoom = 1 + 0.3 * smoothstep((t - E) / ILLUM_LEN)
         elif self.W <= t < self.total:
             zoom = 1 + 0.15 * smoothstep((t - self.W) / (self.total - self.W))
+        shake *= self.effects.shake
         if zoom != 1.0 or shake:
             cw, ch = w / zoom, h / zoom
             cx = self.tx + self.rnd.uniform(-shake, shake) * s
@@ -327,26 +332,28 @@ class MLG:
             src = src.resize((w, h), Image.BILINEAR, box=(cx - cw / 2, cy - ch / 2, cx + cw / 2, cy + ch / 2))
 
         # Deep fry during the drop.
+        fry = self.effects.deep_fry
         if D <= t < E:
-            src = ImageEnhance.Color(src).enhance(2.8)
-            src = ImageEnhance.Contrast(src).enhance(1.5)
-            src = ImageEnhance.Sharpness(src).enhance(6)
+            src = ImageEnhance.Color(src).enhance(1 + 1.8 * fry)
+            src = ImageEnhance.Contrast(src).enhance(1 + 0.5 * fry)
+            src = ImageEnhance.Sharpness(src).enhance(1 + 5 * fry)
             buf = io.BytesIO()
-            src.save(buf, "JPEG", quality=7)
+            src.save(buf, "JPEG", quality=max(2, round(95 - 88 * fry)))
             src = Image.open(buf).convert("RGB")
             if any(0 <= t - sn < 0.08 for sn in self.snares):
                 r, g, b = src.split()
-                src = Image.merge("RGB", (b, r, g))  # hue slap on the snare
+                swapped = Image.merge("RGB", (b, r, g))
+                src = Image.blend(src, swapped, min(1.0, fry))  # hue slap on the snare
         elif E <= t < self.W:
             src = ImageEnhance.Brightness(ImageEnhance.Color(src).enhance(0.2)).enhance(0.4)
         elif self.replay(t):
             k = self.replay(t)[0]
             if k == 0:  # black & white
-                src = ImageEnhance.Contrast(src.convert("L").convert("RGB")).enhance(1.6)
+                src = ImageEnhance.Contrast(src.convert("L").convert("RGB")).enhance(1 + 0.6 * fry)
             else:  # fried + channel-swapped
-                src = ImageEnhance.Contrast(ImageEnhance.Color(src).enhance(3)).enhance(1.6)
+                src = ImageEnhance.Contrast(ImageEnhance.Color(src).enhance(1 + 2 * fry)).enhance(1 + 0.6 * fry)
                 r_, g_, b_ = src.split()
-                src = Image.merge("RGB", (g_, b_, r_))
+                src = Image.blend(src, Image.merge("RGB", (g_, b_, r_)), min(1.0, fry))
 
         im = src.convert("RGBA")
 
@@ -400,7 +407,8 @@ class MLG:
         for ft in self.flares:  # lens flare sweep
             if self.flare and 0 <= t - ft < 0.6:
                 k = (t - ft) / 0.6
-                self.paste(im, self.flare, w * (0.2 + 0.6 * k), h * 0.4, alpha=math.sin(math.pi * k))
+                self.paste(im, self.flare, w * (0.2 + 0.6 * k), h * 0.4,
+                           alpha=min(1.0, math.sin(math.pi * k) * self.effects.flashes))
         if t < M - SCOPE_IN:  # the Sony Vegas default nobody deleted
             im.alpha_composite(sprites.sample_text(int(46 * s)), (int(40 * s), int(h * 0.75)))
 
@@ -463,7 +471,7 @@ class MLG:
 
         for st in self.shots:  # muzzle flash
             if 0 <= t - st < 0.15:
-                a = int(255 * (1 - (t - st) / 0.15))
+                a = min(255, int(255 * (1 - (t - st) / 0.15) * self.effects.flashes))
                 im.alpha_composite(Image.new("RGBA", (w, h), (255, 255, 255, a)))
 
         return im.convert("RGB")
@@ -581,6 +589,8 @@ def main(argv=None):
     ap.add_argument("--preview", action="store_true",
                     help="quick render: up to 640px wide at 15fps, with faster encoding")
     ap.add_argument("--seed", type=int, default=420)
+    ap.add_argument("--intensity", choices=INTENSITIES, default="normal",
+                    help="visual effects: low, normal (default), or chaos")
     music = ap.add_mutually_exclusive_group()
     music.add_argument("--drop", help="drop track (default: sounds/drop.*, else synthesised wobble)")
     music.add_argument("--no-drop", dest="drop_enabled", action="store_false", default=True,
@@ -654,7 +664,7 @@ def render_video(a, ap):
     drop = (a.drop or sfx.find_sound("drop")) if a.drop_enabled else None
     mlg = MLG(w, h, fps, moment, target, a.seed, drop, a.drop_start, a.drop_len, a.bpm,
               weed=a.weed, deal_with_it=a.deal_with_it, illuminati=a.illuminati, replays=a.replays,
-              replay_count=a.replay_count, drop_enabled=a.drop_enabled)
+              replay_count=a.replay_count, drop_enabled=a.drop_enabled, intensity=a.intensity)
     drop_status = f"drop @ {mlg.D:.2f}s" if a.drop_enabled else "drop off"
     print(f"big moment @ {moment:.2f}s, {drop_status}, output {mlg.total:.1f}s {w}x{h}@{fps:g}", file=sys.stderr)
 

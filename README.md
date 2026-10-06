@@ -59,10 +59,12 @@ removes the joints and falling leaves; `--no-illuminati` removes the eye during
 the drop. You can explicitly enable them with `--weed`, `--deal-with-it`,
 `--illuminati`, and `--replays`.
 
-Use `--no-drop` to skip the dubstep section and its overlays and voice lines:
+Use `--no-drop` to skip the dubstep section and its overlays and voice lines.
+Choose the number of replays with `--replay-count N` (default: 2). Zero skips
+them; `--no-replays` takes precedence over the count.
 
 ```sh
-uv run mlg clip.mp4 --no-drop --no-weed
+uv run mlg clip.mp4 --replay-count 1 --no-drop --no-weed
 ```
 
 ## Bring your own drop

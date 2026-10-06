@@ -64,6 +64,22 @@ class SectionTests(unittest.TestCase):
                                              for i in range(4 if st == m.M else 3)])
                     self.assertEqual(m.snares, [])
 
+    def test_replay_count_and_no_drop_skip_music(self):
+        for count, enabled in ((0, True), (1, True), (4, True), (4, False)):
+            with self.subTest(count=count, enabled=enabled), \
+                    patch.object(sfx, "decode", side_effect=AssertionError("music decoded")), \
+                    patch.object(sfx, "dubstep_drop", side_effect=AssertionError("music synthesized")), \
+                    patch.object(sfx, "load", return_value=np.zeros(1, np.float32)):
+                m = render.MLG(320, 180, 30, 2, (0.5, 0.5), 420, drop="unused.mp3",
+                               drop_enabled=False, replays=enabled, replay_count=count,
+                               weed=False, illuminati=False, deal_with_it=False)
+                actual = count if enabled else 0
+                self.assertEqual(len(m.shots), actual + 1)
+                self.assertAlmostEqual(m.total, 2 + render.FIRST + actual * render.REPLAY_LEN)
+                for i in range(actual):
+                    self.assertEqual(m.replay(m.R0 + i + 0.5)[0], i)
+                self.assertIsNone(m.replay(m.R0 + actual))
+                self.assertFalse(np.any(m.audio(np.zeros(0))[int(2.5 * sfx.SR):]))
 
 
 if __name__ == "__main__":

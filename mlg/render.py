@@ -126,13 +126,14 @@ def smoothstep(x):
 
 class MLG:
     def __init__(self, w, h, fps, moment, target, seed, drop=None, drop_start=0.0, drop_len=6.0, bpm=140.0,
-                 *, weed=True, deal_with_it=True, illuminati=True, replays=True, drop_enabled=True):
+                 *, weed=True, deal_with_it=True, illuminati=True, replays=True,
+                 replay_count=REPLAYS, drop_enabled=True):
         self.w, self.h, self.fps = w, h, fps
         self.M = moment
         self.weed = weed
         self.deal_with_it = deal_with_it
         self.illuminati = illuminati
-        self.replays = REPLAYS if replays else 0
+        self.replays = replay_count if replays else 0
         self.drop_enabled = drop_enabled
         self.R0 = moment + FIRST                                   # instant replays start
         self.D = self.R0 + self.replays * REPLAY_LEN + (DROP_GAP if drop_enabled else 0)         # the drop
@@ -417,7 +418,7 @@ class MLG:
                 self.paste(im, self.hit, hx, hy)
 
         if r and (r[1] * 4) % 1 < 0.6:  # blinking replay bug
-            self.text(im, t, "REPLAY" if r[0] == 0 else "REPLAY x2", w * 0.82, h * 0.1, 70,
+            self.text(im, t, "REPLAY" if r[0] == 0 else f"REPLAY x{r[0] + 1}", w * 0.82, h * 0.1, 70,
                       self.R0 + r[0] * REPLAY_LEN, wobble=False, colour=(255, 30, 30))
         if r and r[1] >= REPLAY_SHOT:
             self.text(im, t, ["NO SCOPE?!", "GET REKT M8"][r[0] % 2], w / 2, h * 0.3, 120,
@@ -556,6 +557,13 @@ def target_point(value):
         raise argparse.ArgumentTypeError("target must be x,y with both coordinates between 0 and 1") from None
 
 
+def replay_number(value):
+    count = int(value)
+    if count < 0:
+        raise argparse.ArgumentTypeError("replay count must be zero or greater")
+    return count
+
+
 def output_width(value):
     width = int(value)
     if width < 2:
@@ -587,6 +595,8 @@ def main(argv=None):
                           help="Illuminati outro and eye overlay during the drop")
     sections.add_argument("--replays", action=argparse.BooleanOptionalAction, default=True,
                           help="two instant replays after the shot")
+    sections.add_argument("--replay-count", type=replay_number, default=REPLAYS, metavar="N",
+                          help="number of instant replays (default: 2; --no-replays overrides this)")
     a = ap.parse_args(argv)
 
     try:
@@ -641,7 +651,7 @@ def render_video(a, ap):
     drop = (a.drop or sfx.find_sound("drop")) if a.drop_enabled else None
     mlg = MLG(w, h, fps, moment, target, a.seed, drop, a.drop_start, a.drop_len, a.bpm,
               weed=a.weed, deal_with_it=a.deal_with_it, illuminati=a.illuminati, replays=a.replays,
-              drop_enabled=a.drop_enabled)
+              replay_count=a.replay_count, drop_enabled=a.drop_enabled)
     drop_status = f"drop @ {mlg.D:.2f}s" if a.drop_enabled else "drop off"
     print(f"big moment @ {moment:.2f}s, {drop_status}, output {mlg.total:.1f}s {w}x{h}@{fps:g}", file=sys.stderr)
 

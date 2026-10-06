@@ -16,7 +16,7 @@ class ValidationTests(unittest.TestCase):
         for args in (("--target", "2,0.5"), ("--target", "0.5"),
                      ("--target", "nan,0"), ("--bpm", "0"), ("--bpm", "inf"),
                      ("--drop-len", "-1"), ("--drop-start", "-1"),
-                     ("--moment", "-1"), ("--width", "1"),
+                     ("--moment", "-1"), ("--width", "1"), ("--replay-count", "-1"),
                      ("--drop", "track.mp3", "--no-drop")):
             with self.subTest(args=args), patch.object(render, "probe") as probe:
                 stderr = io.StringIO()

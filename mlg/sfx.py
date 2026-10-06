@@ -8,6 +8,8 @@ from pathlib import Path
 
 import numpy as np
 
+from .resources import data_directory
+
 SR = 44100
 rng = np.random.default_rng(1337)
 
@@ -151,7 +153,7 @@ def riser(dur=1.0):
     return _norm(_lowpass(x, 400 + 6000 * t / dur) * (t / dur), 0.5)
 
 
-SOUNDS_DIR = Path(__file__).resolve().parent.parent / "sounds"
+SOUNDS_DIR = data_directory("sounds")
 AUDIO_EXTS = (".mp3", ".wav", ".ogg", ".m4a", ".flac", ".opus")
 
 

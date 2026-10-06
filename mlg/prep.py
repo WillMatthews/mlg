@@ -7,7 +7,9 @@ from pathlib import Path
 import numpy as np
 from PIL import Image, ImageDraw, ImageSequence
 
-ASSETS = Path(__file__).resolve().parent.parent / "assets"
+from .resources import data_directory
+
+ASSETS = data_directory("assets")
 KEY = (255, 0, 255)
 
 

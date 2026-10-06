@@ -7,6 +7,8 @@ from pathlib import Path
 
 from PIL import Image, ImageDraw, ImageFilter, ImageFont
 
+from .resources import data_directory
+
 FONT_PATHS = [
     "/usr/share/fonts/truetype/msttcorefonts/Impact.ttf",
     "/usr/share/fonts/truetype/liberation/LiberationSansNarrow-Bold.ttf",
@@ -159,7 +161,7 @@ def rainbow(t):
     return int(r * 255), int(g * 255), int(b * 255)
 
 
-ASSETS_DIR = Path(__file__).resolve().parent.parent / "assets"
+ASSETS_DIR = data_directory("assets")
 
 
 def fit(im, width=None, height=None, nearest=False):

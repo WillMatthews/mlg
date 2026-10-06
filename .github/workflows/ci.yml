@@ -1,0 +1,38 @@
+name: CI
+
+on:
+  push:
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    strategy:
+      fail-fast: false
+      matrix:
+        python-version: ["3.12", "3.13"]
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: astral-sh/setup-uv@c771a70e6277c0a99b617c7a806ffedaca235ff9 # v9.0.0
+        with:
+          python-version: ${{ matrix.python-version }}
+          enable-cache: true
+      - name: Install FFmpeg and fonts
+        run: sudo apt-get update && sudo apt-get install -y ffmpeg fonts-dejavu-core
+      - name: Install locked dependencies
+        run: uv sync --locked
+      - name: Test CLI, sections, and real renders
+        run: uv run --locked python -m unittest discover -s tests -v
+      - name: Build wheel from source distribution
+        run: uv build --out-dir "$RUNNER_TEMP/mlg-dist"
+      - name: Check installed wheel outside checkout
+        run: |
+          uv venv "$RUNNER_TEMP/mlg-wheel"
+          uv pip install --python "$RUNNER_TEMP/mlg-wheel/bin/python" "$RUNNER_TEMP"/mlg-dist/*.whl
+          cd "$RUNNER_TEMP"
+          "$RUNNER_TEMP/mlg-wheel/bin/python" "$GITHUB_WORKSPACE/tests/check_wheel.py"
+          "$RUNNER_TEMP/mlg-wheel/bin/mlg" --help

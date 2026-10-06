@@ -32,6 +32,19 @@ class ValidationTests(unittest.TestCase):
                 render.main(args)
             self.assertEqual(result.exception.code, 2)
 
+    def test_missing_ffmpeg(self):
+        with patch.object(render.shutil, "which", return_value=None), \
+                contextlib.redirect_stderr(io.StringIO()), self.assertRaises(SystemExit) as result:
+            render.main([str(SOURCE)])
+        self.assertEqual(result.exception.code, 2)
+
+    def test_moment_beyond_video(self):
+        info = {"w": 320, "h": 180, "fps": 30, "duration": 2, "has_audio": False}
+        with patch.object(render, "probe", return_value=info), \
+                contextlib.redirect_stderr(io.StringIO()), self.assertRaises(SystemExit) as result:
+            render.main([str(SOURCE), "-m", "3"])
+        self.assertEqual(result.exception.code, 2)
+
 
 if __name__ == "__main__":
     unittest.main()

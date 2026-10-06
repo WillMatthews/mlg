@@ -645,7 +645,8 @@ def render_video(a, ap):
             enc = subprocess.Popen(["ffmpeg", "-v", "error", "-y", "-f", "rawvideo", "-pix_fmt", "rgb24",
                                     "-s", f"{w}x{h}", "-r", f"{fps}", "-i", "-", "-i", str(wav),
                                     "-c:v", "libx264", "-preset", "fast", "-crf", "20", "-pix_fmt", "yuv420p",
-                                    "-c:a", "aac", "-b:a", "192k", "-shortest", str(staged)],
+                                    "-c:a", "aac", "-b:a", "192k", "-shortest",
+                                    "-movflags", "+faststart", str(staged)],
                                    stdin=subprocess.PIPE, stderr=errors)
             reader = None
             try:

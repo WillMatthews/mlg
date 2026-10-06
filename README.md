@@ -6,6 +6,25 @@ DAMN SON, WOMBO COMBO) → ILLUMINATI CONFIRMED → SMOKE WEED EVERYDAY → DEAL
 First-person MW2 Intervention quickscope (keyed from the classic green screen, needs
 `yt-dlp`), the real MW2 sniper reticle texture and the meme-standard hitmarker.
 
+## Before and after
+
+An original arcade target clip, transformed by `mlg`. Click either preview for
+the full 720p video; the after video includes sound.
+
+| Before · 8 seconds | After · 19 seconds |
+| --- | --- |
+| [![Original target practice clip](demo/before.gif)](demo/target_practice.mp4) | [![MLG quickscopes, replays, and meme effects](demo/after.gif)](demo/demo_MLG.mp4) |
+
+[Download before](https://raw.githubusercontent.com/WillMatthews/mlg/main/demo/target_practice.mp4)
+· [Download after with audio](https://raw.githubusercontent.com/WillMatthews/mlg/main/demo/demo_MLG.mp4)
+· [Recreate the demo](demo/README.md)
+
+```sh
+uv run mlg demo/target_practice.mp4 -m 3.2 --target 0.5,0.5
+```
+
+## Usage
+
     uv run mlg clip.mp4                   # -> clip_MLG.mp4
     uv run mlg clip.mp4 -m 4.2 --target 0.4,0.3
     uv run mlg clip.mp4 --drop bangarang.mp3 --drop-start 31.5 --bpm 110

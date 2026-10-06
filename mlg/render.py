@@ -71,8 +71,9 @@ class FrameReader:
 
     def __init__(self, path, w, h, fps):
         self.w, self.h, self.fps = w, h, fps
+        self.errors = tempfile.TemporaryFile(mode="w+b")
         self.proc = subprocess.Popen(["ffmpeg", "-v", "error", "-i", str(path), "-vf", f"scale={w}:{h},fps={fps}",
-                                      "-f", "rawvideo", "-pix_fmt", "rgb24", "-"], stdout=subprocess.PIPE)
+                                      "-f", "rawvideo", "-pix_fmt", "rgb24", "-"], stdout=subprocess.PIPE, stderr=self.errors)
         self.idx, self.frame = -1, None
         self.size = w * h * 3
         self.keep = range(0)  # frame indices cached so replays can rewind
@@ -88,6 +89,12 @@ class FrameReader:
         while self.idx < want:
             buf = self.proc.stdout.read(self.size)
             if len(buf) < self.size:
+                code = self.proc.wait()
+                if code:
+                    self.errors.seek(0)
+                    raise RuntimeError("video decoding failed: " + self.errors.read().decode(errors="replace").strip())
+                if self.frame is None:
+                    raise RuntimeError("input video contains no decodable frames")
                 break  # EOF: hold the last frame
             self.frame, self.idx = buf, self.idx + 1
             if self.idx in self.keep:
@@ -95,9 +102,11 @@ class FrameReader:
         return Image.frombytes("RGB", (self.w, self.h), self.frame)
 
     def close(self):
-        self.proc.kill()  # we may stop reading before EOF (slow-mo / freeze)
+        if self.proc.poll() is None:
+            self.proc.kill()  # slow-mo / freeze may stop reading before EOF
         self.proc.stdout.close()
         self.proc.wait()
+        self.errors.close()
 
 
 @dataclass
@@ -572,6 +581,18 @@ def main(argv=None):
                           help="two instant replays after the shot")
     a = ap.parse_args(argv)
 
+    try:
+        render_video(a, ap)
+    except KeyboardInterrupt:
+        ap.exit(130, "\nmlg: render cancelled\n")
+    except (OSError, ValueError, RuntimeError, subprocess.CalledProcessError) as exc:
+        detail = exc.stderr if isinstance(exc, subprocess.CalledProcessError) else str(exc)
+        if isinstance(detail, bytes):
+            detail = detail.decode(errors="replace")
+        ap.exit(1, f"mlg: {detail or str(exc)}\n")
+
+
+def render_video(a, ap):
     inp = Path(a.input)
     out = Path(a.output or inp.with_name(inp.stem + "_MLG.mp4"))
     if not inp.is_file():
@@ -614,24 +635,49 @@ def main(argv=None):
               weed=a.weed, deal_with_it=a.deal_with_it, illuminati=a.illuminati, replays=a.replays)
     print(f"big moment @ {moment:.2f}s, drop @ {mlg.D:.2f}s, output {mlg.total:.1f}s {w}x{h}@{fps:g}", file=sys.stderr)
 
-    with tempfile.TemporaryDirectory() as tmp:
+    # Encode beside the destination so successful replacement is atomic. A failed
+    # render leaves any existing output intact and removes its partial files.
+    with tempfile.TemporaryDirectory(prefix=".mlg-", dir=out.parent) as tmp:
         wav = Path(tmp) / "mlg.wav"
+        staged = Path(tmp) / ("output" + out.suffix)
         write_wav(wav, mlg.audio(orig))
-        enc = subprocess.Popen(["ffmpeg", "-v", "error", "-y", "-f", "rawvideo", "-pix_fmt", "rgb24",
-                                "-s", f"{w}x{h}", "-r", f"{fps}", "-i", "-", "-i", str(wav),
-                                "-c:v", "libx264", "-preset", "fast", "-crf", "20", "-pix_fmt", "yuv420p",
-                                "-c:a", "aac", "-b:a", "192k", "-shortest", str(out)], stdin=subprocess.PIPE)
-        reader = FrameReader(inp, w, h, fps)
-        reader.cache_window(moment - REPLAY_SHOT - 0.2, moment + FIRST * SLOWMO + 0.2)
-        n = int(mlg.total * fps)
-        for i in range(n):
-            t = i / fps
-            enc.stdin.write(mlg.frame(reader.get(mlg.src_time(t)), t).tobytes())
-            if i % 30 == 0:
-                print(f"\r  frame {i}/{n}", end="", file=sys.stderr)
-        reader.close()
-        enc.stdin.close()
-        enc.wait()
+        with tempfile.TemporaryFile(mode="w+b") as errors:
+            enc = subprocess.Popen(["ffmpeg", "-v", "error", "-y", "-f", "rawvideo", "-pix_fmt", "rgb24",
+                                    "-s", f"{w}x{h}", "-r", f"{fps}", "-i", "-", "-i", str(wav),
+                                    "-c:v", "libx264", "-preset", "fast", "-crf", "20", "-pix_fmt", "yuv420p",
+                                    "-c:a", "aac", "-b:a", "192k", "-shortest", str(staged)],
+                                   stdin=subprocess.PIPE, stderr=errors)
+            reader = None
+            try:
+                reader = FrameReader(inp, w, h, fps)
+                reader.cache_window(moment - REPLAY_SHOT - 0.2, moment + FIRST * SLOWMO + 0.2)
+                n = int(mlg.total * fps)
+                try:
+                    for i in range(n):
+                        t = i / fps
+                        enc.stdin.write(mlg.frame(reader.get(mlg.src_time(t)), t).tobytes())
+                        if i % 30 == 0:
+                            print(f"\r  frame {i}/{n}", end="", file=sys.stderr)
+                    enc.stdin.close()
+                except BrokenPipeError:
+                    pass  # report FFmpeg's diagnostic below
+                code = enc.wait()
+                if code:
+                    errors.seek(0)
+                    raise RuntimeError("video encoding failed: " + errors.read().decode(errors="replace").strip())
+                if not staged.is_file() or not staged.stat().st_size:
+                    raise RuntimeError("video encoding produced no output")
+            finally:
+                if reader is not None:
+                    reader.close()
+                if enc.poll() is None:
+                    enc.kill()
+                try:
+                    enc.stdin.close()
+                except BrokenPipeError:
+                    pass
+                enc.wait()
+        staged.replace(out)
     print(f"\r  done -> {out}", file=sys.stderr)
 
 

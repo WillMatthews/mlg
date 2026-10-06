@@ -19,12 +19,13 @@ class SectionTests(unittest.TestCase):
             return np.full(int(0.1 * sfx.SR), levels.get(slot, 0), np.float32)
 
         src = Image.new("RGB", (320, 180), (30, 60, 90))
-        for values in itertools.product((False, True), repeat=4):
-            options = dict(zip(("weed", "deal_with_it", "illuminati", "replays"), values))
+        for values in itertools.product((False, True), repeat=5):
+            options = dict(zip(("weed", "deal_with_it", "illuminati", "replays", "drop_enabled"), values))
             with self.subTest(**options), patch.object(sfx, "load", side_effect=sound), \
                     patch.object(sfx, "dubstep_drop", return_value=(np.zeros(2 * sfx.SR), 0.5)):
                 m = render.MLG(320, 180, 30, 2, (0.5, 0.5), 420, **options)
-                expected = (2 + render.FIRST + render.DROP_GAP + 2
+                expected = (2 + render.FIRST
+                            + (render.DROP_GAP + 2 if options["drop_enabled"] else 0)
                             + (2 * render.REPLAY_LEN if options["replays"] else 0)
                             + (render.ILLUM_LEN if options["illuminati"] else 0)
                             + (render.WEED_LEN if options["weed"] else 0)
@@ -57,6 +58,12 @@ class SectionTests(unittest.TestCase):
                 if not options["weed"]:
                     self.assertFalse(m.joint)
                     self.assertTrue(all(p.t0 < m.E for p in m.particles))
+                if not options["drop_enabled"]:
+                    self.assertEqual(m.D, m.E)
+                    self.assertEqual(m.hits, [st + 0.1 * i for st in m.shots
+                                             for i in range(4 if st == m.M else 3)])
+                    self.assertEqual(m.snares, [])
+
 
 
 if __name__ == "__main__":

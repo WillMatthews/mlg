@@ -126,17 +126,21 @@ def smoothstep(x):
 
 class MLG:
     def __init__(self, w, h, fps, moment, target, seed, drop=None, drop_start=0.0, drop_len=6.0, bpm=140.0,
-                 *, weed=True, deal_with_it=True, illuminati=True, replays=True):
+                 *, weed=True, deal_with_it=True, illuminati=True, replays=True, drop_enabled=True):
         self.w, self.h, self.fps = w, h, fps
         self.M = moment
         self.weed = weed
         self.deal_with_it = deal_with_it
         self.illuminati = illuminati
         self.replays = REPLAYS if replays else 0
+        self.drop_enabled = drop_enabled
         self.R0 = moment + FIRST                                   # instant replays start
-        self.D = self.R0 + self.replays * REPLAY_LEN + DROP_GAP         # the drop
+        self.D = self.R0 + self.replays * REPLAY_LEN + (DROP_GAP if drop_enabled else 0)         # the drop
         self.shots = [moment] + [self.R0 + k * REPLAY_LEN + REPLAY_SHOT for k in range(self.replays)]
-        if drop:
+        if not drop_enabled:
+            self.drop_audio = np.zeros(0, np.float32)
+            self.beat = 60.0 / bpm
+        elif drop:
             self.drop_audio = sfx.decode(drop, drop_start, drop_len, trim_silence=False)
             if not len(self.drop_audio):
                 raise ValueError("drop contains no audio at --drop-start")
@@ -168,8 +172,8 @@ class MLG:
         # Voice lines back to back during the drop.
         dur = lambda k: len(self.clips[k]) / sfx.SR
         self.mom_at = self.D + 0.05
-        self.triple_at = min(self.mom_at + dur("mom") + 0.05, self.E - 1.0)
-        self.damn_at = min(self.triple_at + dur("triple") + 0.05, self.E - 1.0)
+        self.triple_at = max(self.D, min(self.mom_at + dur("mom") + 0.05, self.E - 1.0))
+        self.damn_at = max(self.D, min(self.triple_at + dur("triple") + 0.05, self.E - 1.0))
         self.total = self.DW + (DEAL_LEN if deal_with_it else 0)
         self.tx, self.ty = target[0] * w, target[1] * h
         self.rnd = random.Random(seed)
@@ -216,11 +220,11 @@ class MLG:
                              self.rnd.uniform(300, 700) * s, self.rnd.uniform(-80, 80) * s,
                              self.rnd.uniform(-540, 540)) for _ in range(count)]
 
-        self.particles = rain(snacks, self.D, self.E - 0.6, 24)
+        self.particles = rain(snacks, self.D, self.E - 0.6, 24) if drop_enabled else []
         if leaves and self.weed:
             self.particles += rain(leaves, self.W, self.DW, 14)
         b = self.beat
-        bars = max(1, round((self.E - self.D) / (4 * b)))
+        bars = max(1, round((self.E - self.D) / (4 * b))) if drop_enabled else 0
         self.kicks = [self.D + bar * 4 * b + o for bar in range(bars) for o in (0, 2.5 * b)]
         self.snares = [self.D + bar * 4 * b + 2 * b for bar in range(bars)]
         # Hitmarker spam: a burst on the shot (round the target), then every 8th note of the drop
@@ -233,9 +237,9 @@ class MLG:
                          for _ in shot]
                         + [(self.rnd.uniform(0.15, 0.85) * w, self.rnd.uniform(0.2, 0.8) * h) for _ in spam])
         self.wows = [(sn, self.rnd.uniform(0.15, 0.85) * w, self.rnd.uniform(0.2, 0.8) * h) for sn in self.snares[:-1]]
-        self.wombo_at = self.snares[-1]  # stacked over whatever voice line is playing
+        self.wombo_at = self.snares[-1] if self.snares else None  # stacked over whatever voice line is playing
         self.sanic_at = self.D + 0.45 * (self.E - self.D)
-        self.flares = self.shots + [self.D]
+        self.flares = self.shots + ([self.D] if drop_enabled else [])
         self.flyby_at = self.D + 4 * b  # 360 Intervention fly-by on bar 2 of the drop
 
     # --- timing -----------------------------------------------------------
@@ -389,7 +393,7 @@ class MLG:
         if self.frog and D <= t < E:  # rainbow frog bobbing at the right edge
             f = self.frog[int((t - D) * 20) % len(self.frog)]
             self.paste(im, f, w - f.width * 0.45, h - f.height * 0.5 + 15 * s * math.sin(t * 16))
-        if self.sanic and 0 <= t - self.sanic_at < 0.5:  # gotta go fast
+        if self.drop_enabled and self.sanic and 0 <= t - self.sanic_at < 0.5:  # gotta go fast
             k = (t - self.sanic_at) / 0.5
             self.paste(im, self.sanic, -0.3 * w + 1.6 * w * k, h * 0.55, angle=-15)
         for ft in self.flares:  # lens flare sweep
@@ -404,7 +408,7 @@ class MLG:
         if self.joint and self.W <= t < self.DW:  # flanking Snoop
             self.paste(im, self.joint, w * 0.2, h * 0.45, angle=-540 * t, scale=1.3)
             self.paste(im, self.joint, w * 0.8, h * 0.45, angle=540 * t, scale=1.3)
-        if self.rifle and 0 <= t - self.flyby_at < 0.9:  # 360 no-scope fly-by
+        if self.drop_enabled and self.rifle and 0 <= t - self.flyby_at < 0.9:  # 360 no-scope fly-by
             k = (t - self.flyby_at) / 0.9
             self.paste(im, self.rifle, -0.3 * w + 1.6 * w * k, h * (0.6 - 0.2 * math.sin(math.pi * k)), angle=360 * k)
 
@@ -493,14 +497,15 @@ class MLG:
             place(c["airhorn"][: int(0.4 * sfx.SR)], st + 0.08, 0.8)
             if k == self.replays - 1:
                 place(c["crowd_ohh"], st + 0.1, 0.9)
-        place(self.drop_audio, self.D, 0.8)
-        place(c["mom"], self.mom_at, 1.0)
-        place(c["triple"], self.triple_at, 1.0)
-        place(c["damn"], self.damn_at, 1.0)
-        place(c["smash_ohh"], self.wombo_at - len(c["smash_ohh"]) / sfx.SR + 0.15, 1.0)  # builds into it
-        place(c["wombo"], self.wombo_at, 1.0)
-        for (wt, _, _) in self.wows:
-            place(c["wow"], wt, 0.7)
+        if self.drop_enabled:
+            place(self.drop_audio, self.D, 0.8)
+            place(c["mom"], self.mom_at, 1.0)
+            place(c["triple"], self.triple_at, 1.0)
+            place(c["damn"], self.damn_at, 1.0)
+            place(c["smash_ohh"], self.wombo_at - len(c["smash_ohh"]) / sfx.SR + 0.15, 1.0)  # builds into it
+            place(c["wombo"], self.wombo_at, 1.0)
+            for (wt, _, _) in self.wows:
+                place(c["wow"], wt, 0.7)
         if self.illuminati:
             place(c["xfiles"][: int(ILLUM_LEN * sfx.SR)], self.E, 1.0)
         if self.weed:
@@ -566,7 +571,10 @@ def main(argv=None):
     ap.add_argument("--target", type=target_point, default="0.5,0.5", help="scope aim / shades landing point as x,y fractions")
     ap.add_argument("--width", type=output_width, default=1280)
     ap.add_argument("--seed", type=int, default=420)
-    ap.add_argument("--drop", help="drop track (default: sounds/drop.*, else synthesised wobble)")
+    music = ap.add_mutually_exclusive_group()
+    music.add_argument("--drop", help="drop track (default: sounds/drop.*, else synthesised wobble)")
+    music.add_argument("--no-drop", dest="drop_enabled", action="store_false", default=True,
+                       help="skip the dubstep section, including its effects and voice lines")
     ap.add_argument("--drop-start", type=nonnegative_number, default=0.0, help="where the drop starts in the track (s)")
     ap.add_argument("--drop-len", type=positive_number, default=8.0, help="seconds of drop to use")
     ap.add_argument("--bpm", type=positive_number, default=140.0, help="drop tempo, for beat-synced zooms")
@@ -630,10 +638,12 @@ def render_video(a, ap):
     moment = min(max(moment, SCOPE_IN + 0.3), info["duration"])
     target = a.target
 
-    drop = a.drop or sfx.find_sound("drop")
+    drop = (a.drop or sfx.find_sound("drop")) if a.drop_enabled else None
     mlg = MLG(w, h, fps, moment, target, a.seed, drop, a.drop_start, a.drop_len, a.bpm,
-              weed=a.weed, deal_with_it=a.deal_with_it, illuminati=a.illuminati, replays=a.replays)
-    print(f"big moment @ {moment:.2f}s, drop @ {mlg.D:.2f}s, output {mlg.total:.1f}s {w}x{h}@{fps:g}", file=sys.stderr)
+              weed=a.weed, deal_with_it=a.deal_with_it, illuminati=a.illuminati, replays=a.replays,
+              drop_enabled=a.drop_enabled)
+    drop_status = f"drop @ {mlg.D:.2f}s" if a.drop_enabled else "drop off"
+    print(f"big moment @ {moment:.2f}s, {drop_status}, output {mlg.total:.1f}s {w}x{h}@{fps:g}", file=sys.stderr)
 
     # Encode beside the destination so successful replacement is atomic. A failed
     # render leaves any existing output intact and removes its partial files.
